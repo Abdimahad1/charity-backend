@@ -1,3 +1,4 @@
+// routes/uploadRoutes.js
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
@@ -5,23 +6,23 @@ const multer = require('multer');
 
 const router = express.Router();
 
-// Ensure upload subfolders exist
-const uploadsDir = path.join(__dirname, '..', 'uploads');
-const imagesDir = path.join(uploadsDir, 'images');
-const cvDir = path.join(uploadsDir, 'cv');
+/* ---------- Folders (works local + Render) ---------- */
+const uploadsRoot =
+  process.env.UPLOAD_ROOT ||
+  path.join(__dirname, '..', 'uploads'); // server.js already serves /uploads statically from this
 
-[uploadsDir, imagesDir, cvDir].forEach(dir => {
+const imagesDir = path.join(uploadsRoot, 'images');
+const cvDir = path.join(uploadsRoot, 'cv');
+
+[uploadsRoot, imagesDir, cvDir].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// Multer storage
+/* ---------- Multer config ---------- */
 const storage = multer.diskStorage({
   destination: (_req, file, cb) => {
-    if (file.fieldname === 'cv') {
-      cb(null, cvDir);
-    } else {
-      cb(null, imagesDir);
-    }
+    if (file.fieldname === 'cv') return cb(null, cvDir);
+    return cb(null, imagesDir);
   },
   filename: (_req, file, cb) => {
     const safe = file.originalname.replace(/\s+/g, '-').toLowerCase();
@@ -29,17 +30,15 @@ const storage = multer.diskStorage({
   },
 });
 
-// Multer file filter
 const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
-  const isImage = ['.jpg', '.jpeg', '.png', '.gif'].includes(ext);
+  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
   const isDoc = ['.pdf', '.doc', '.docx'].includes(ext);
 
-  if (file.fieldname === 'cv' && !isDoc) {
-    return cb(new Error('Only PDF, DOC, DOCX allowed for CV'), false);
-  }
-  if (file.fieldname !== 'cv' && !isImage) {
-    return cb(new Error('Only image files allowed for images'), false);
+  if (file.fieldname === 'cv') {
+    if (!isDoc) return cb(new Error('Only PDF, DOC, DOCX allowed for CV'));
+  } else {
+    if (!isImage) return cb(new Error('Only image files allowed'));
   }
   cb(null, true);
 };
@@ -47,25 +46,61 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
+
+/* ---------- Helpers ---------- */
+const makeUrl = (req, subpath) =>
+  `${req.protocol}://${req.get('host')}/uploads/${subpath.replace(/^\/+/, '')}`;
+
+/* ---------- Routes ---------- */
+
+// quick probe
+router.get('/ping', (_req, res) => res.json({ ok: true }));
+
+/**
+ * POST /api/upload           (fallback to image upload)
+ * field: file
+ */
+router.post('/', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+  const url = makeUrl(req, `images/${req.file.filename}`);
+  return res.status(201).json({ url, filename: req.file.filename, kind: 'image' });
 });
 
 /**
- * POST /api/upload/image — field: file
+ * POST /api/upload/image     (explicit image)
+ * field: file
  */
 router.post('/image', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-  const url = `${req.protocol}://${req.get('host')}/uploads/images/${req.file.filename}`;
-  res.status(201).json({ url });
+  const url = makeUrl(req, `images/${req.file.filename}`);
+  return res.status(201).json({ url, filename: req.file.filename, kind: 'image' });
 });
 
 /**
- * POST /api/upload/cv — field: cv
+ * POST /api/upload/cv        (explicit CV)
+ * field: cv
  */
 router.post('/cv', upload.single('cv'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No CV uploaded' });
-  const url = `${req.protocol}://${req.get('host')}/uploads/cv/${req.file.filename}`;
-  res.status(201).json({ url });
+  const url = makeUrl(req, `cv/${req.file.filename}`);
+  return res.status(201).json({ url, filename: req.file.filename, kind: 'cv' });
+});
+
+/* ---------- Multer error handler (nice messages) ---------- */
+router.use((err, _req, res, _next) => {
+  if (err instanceof multer.MulterError) {
+    // size, count, etc.
+    const map = {
+      LIMIT_FILE_SIZE: 'File too large',
+      LIMIT_FILE_COUNT: 'Too many files',
+      LIMIT_UNEXPECTED_FILE: 'Unexpected field',
+    };
+    return res.status(400).json({ message: map[err.code] || err.message });
+  }
+  if (err) return res.status(400).json({ message: err.message || 'Upload error' });
+  res.status(500).json({ message: 'Unknown upload error' });
 });
 
 module.exports = router;
