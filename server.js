@@ -10,6 +10,7 @@ console.log(
 );
 
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -29,7 +30,10 @@ const eventRoutes = require('./routes/eventRoutes');
 const volunteerRoutes = require('./routes/volunteerRoutes');
 const contactRoutes = require('./routes/contactRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+
 const app = express();
+
+// Trust proxy so req.protocol respects x-forwarded-proto (Render/NGINX/etc.)
 app.set('trust proxy', 1);
 
 /* ---------------- Security & body parsing ---------------- */
@@ -38,7 +42,7 @@ app.use(
     crossOriginResourcePolicy: false, // allow serving images to other origins
   })
 );
-// Optional: relax CSP if you embed images/backgrounds from uploads/data/blob
+// Optional CSP example if you want to restrict sources for <img>/media
 // app.use(
 //   helmet.contentSecurityPolicy({
 //     useDefaults: true,
@@ -52,14 +56,14 @@ app.use(
 app.use(compression());
 app.use(cookieParser());
 
-// JSON limit is for JSON bodies only; file uploads go via /api/upload (multer/busboy)
+// JSON limit is for JSON bodies only; file uploads go via /api/upload (multer)
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 /* ---------------- CORS (must be before routes & static) ---------------- */
 const allowAll = (origin, cb) => cb(null, true);
 const corsConfig = {
-  origin: allowAll, // change to your admin/public URLs in production if needed
+  origin: allowAll, // tighten to specific frontends in production if desired
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -73,16 +77,33 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 /* ---------------- Static: uploaded files ----------------
-   Kept AFTER CORS so images get proper CORS headers */
-const uploadsDir = path.join(__dirname, 'uploads');
+   Use the SAME root as uploadRoutes.js so writing & serving match.
+   Supports Render persistent disk via UPLOAD_ROOT env.
+---------------------------------------------------------------- */
+const uploadsRoot = process.env.UPLOAD_ROOT || path.join(__dirname, 'uploads');
+
+// Ensure folders exist (root + images + cv)
+['', 'images', 'cv'].forEach((sub) => {
+  const dir = sub ? path.join(uploadsRoot, sub) : uploadsRoot;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    console.error('⚠️ Failed to create uploads dir:', dir, e.message);
+  }
+});
+
+console.log('📁 uploadsRoot (server.js):', uploadsRoot);
+
 app.use(
   '/uploads',
-  express.static(uploadsDir, {
+  express.static(uploadsRoot, {
     maxAge: '1d',
     setHeaders: (res) => {
-      // Make sure browsers can use them as backgrounds <img> etc. from any origin (dev)
+      // Make sure browsers can use them as backgrounds <img> etc. from any origin
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      // Optional: stronger caching
+      // res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
     },
   })
 );
@@ -96,6 +117,7 @@ app.use('/api/events', eventRoutes);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/contact', contactRoutes);
 app.use('/api/payments', paymentRoutes);
+
 /* ---------------- Healthcheck ---------------- */
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

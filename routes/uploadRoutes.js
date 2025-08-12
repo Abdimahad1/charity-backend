@@ -6,10 +6,10 @@ const multer = require('multer');
 
 const router = express.Router();
 
-/* ---------- Folders (works local + Render) ---------- */
+/* ---------- Folders (local + Render) ---------- */
 const uploadsRoot =
   process.env.UPLOAD_ROOT ||
-  path.join(__dirname, '..', 'uploads'); // server.js already serves /uploads statically from this
+  path.join(__dirname, '..', 'uploads'); // server.js serves /uploads from this root
 
 const imagesDir = path.join(uploadsRoot, 'images');
 const cvDir = path.join(uploadsRoot, 'cv');
@@ -25,12 +25,14 @@ const storage = multer.diskStorage({
     return cb(null, imagesDir);
   },
   filename: (_req, file, cb) => {
-    const safe = file.originalname.replace(/\s+/g, '-').toLowerCase();
-    cb(null, `${Date.now()}-${safe}`);
+    const ext = path.extname(file.originalname).toLowerCase();
+    const base = path.basename(file.originalname, ext);
+    const safeBase = base.replace(/\s+/g, '-').replace(/[^a-z0-9._-]/gi, '').toLowerCase();
+    cb(null, `${Date.now()}-${safeBase}${ext}`);
   },
 });
 
-const fileFilter = (req, file, cb) => {
+const fileFilter = (_req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
   const isDoc = ['.pdf', '.doc', '.docx'].includes(ext);
@@ -50,8 +52,15 @@ const upload = multer({
 });
 
 /* ---------- Helpers ---------- */
-const makeUrl = (req, subpath) =>
-  `${req.protocol}://${req.get('host')}/uploads/${subpath.replace(/^\/+/, '')}`;
+const makeUrl = (req, subpath) => {
+  // trust proxy is enabled in server.js, but be extra robust here
+  const proto = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('x-forwarded-host') || req.get('host');
+  const clean = subpath.replace(/^\/+/, '');
+  return `${proto}://${host}/uploads/${clean}`;
+};
+
+const makeRelative = (subpath) => `/uploads/${subpath.replace(/^\/+/, '')}`;
 
 /* ---------- Routes ---------- */
 
@@ -59,13 +68,14 @@ const makeUrl = (req, subpath) =>
 router.get('/ping', (_req, res) => res.json({ ok: true }));
 
 /**
- * POST /api/upload           (fallback to image upload)
+ * POST /api/upload           (default image)
  * field: file
  */
 router.post('/', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+  const rel = makeRelative(`images/${req.file.filename}`);
   const url = makeUrl(req, `images/${req.file.filename}`);
-  return res.status(201).json({ url, filename: req.file.filename, kind: 'image' });
+  return res.status(201).json({ url, path: rel, filename: req.file.filename, kind: 'image' });
 });
 
 /**
@@ -74,8 +84,9 @@ router.post('/', upload.single('file'), (req, res) => {
  */
 router.post('/image', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+  const rel = makeRelative(`images/${req.file.filename}`);
   const url = makeUrl(req, `images/${req.file.filename}`);
-  return res.status(201).json({ url, filename: req.file.filename, kind: 'image' });
+  return res.status(201).json({ url, path: rel, filename: req.file.filename, kind: 'image' });
 });
 
 /**
@@ -84,14 +95,14 @@ router.post('/image', upload.single('file'), (req, res) => {
  */
 router.post('/cv', upload.single('cv'), (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No CV uploaded' });
+  const rel = makeRelative(`cv/${req.file.filename}`);
   const url = makeUrl(req, `cv/${req.file.filename}`);
-  return res.status(201).json({ url, filename: req.file.filename, kind: 'cv' });
+  return res.status(201).json({ url, path: rel, filename: req.file.filename, kind: 'cv' });
 });
 
 /* ---------- Multer error handler (nice messages) ---------- */
 router.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {
-    // size, count, etc.
     const map = {
       LIMIT_FILE_SIZE: 'File too large',
       LIMIT_FILE_COUNT: 'Too many files',
