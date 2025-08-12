@@ -1,5 +1,13 @@
 // server.js
-require('dotenv').config();
+// Load env before anything else
+require('dotenv').config({
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
+});
+
+// Optional: quick sanity check in logs (won't print secrets)
+console.log(
+  `🔧 Env loaded: ${process.env.NODE_ENV === 'production' ? '.env.production' : '.env'} | NODE_ENV=${process.env.NODE_ENV || 'development'}`
+);
 
 const path = require('path');
 const express = require('express');
