@@ -32,15 +32,30 @@ const storage = multer.diskStorage({
   },
 });
 
+// Accept common image types incl. AVIF & JFIF; keep CV strict
+const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.jfif']);
+const DOC_MIMES  = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
 const fileFilter = (_req, file, cb) => {
-  const ext = path.extname(file.originalname).toLowerCase();
-  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
-  const isDoc = ['.pdf', '.doc', '.docx'].includes(ext);
+  const ext  = (path.extname(file.originalname || '')).toLowerCase();
+  const mime = (file.mimetype || '').toLowerCase();
 
   if (file.fieldname === 'cv') {
-    if (!isDoc) return cb(new Error('Only PDF, DOC, DOCX allowed for CV'));
-  } else {
-    if (!isImage) return cb(new Error('Only image files allowed'));
+    if (!DOC_MIMES.has(mime)) {
+      return cb(new Error('Only PDF, DOC, DOCX allowed for CV'));
+    }
+    return cb(null, true);
+  }
+
+  // images
+  const isImageMime = mime.startsWith('image/'); // e.g., image/jpeg, image/avif
+  const isAllowedExt = IMAGE_EXTS.has(ext) || (ext === '' && isImageMime);
+  if (!isImageMime || !isAllowedExt) {
+    return cb(new Error('Only image files allowed (jpg, jpeg, png, gif, webp, avif, jfif)'));
   }
   cb(null, true);
 };
@@ -50,6 +65,7 @@ const upload = multer({
   fileFilter,
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
+
 
 /* ---------- Helpers ---------- */
 const makeUrl = (req, subpath) => {
