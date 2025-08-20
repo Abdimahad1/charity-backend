@@ -1,21 +1,21 @@
-const { Schema, model } = require('mongoose');
+const mongoose = require('mongoose');
 
-const PaymentSchema = new Schema({
+const PaymentSchema = new mongoose.Schema({
   method: { type: String, enum: ['EVC', 'EDAHAB'], required: true },
   currency: { type: String, default: 'USD' },
   amount: { type: Number, required: true },
   fee: { type: Number, default: 0 },
+  projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Charity', index: true },
 
   name: String,
-  phone: String,             // user input
-  phoneFormatted: String,    // 252-prefixed stored
+  phone: String,
+  phoneFormatted: String,
   email: String,
   note: String,
 
-  // app reference used for polling (maps to invoice/reference)
-  reference: { type: String, index: true }, // our own reference/id we return to FE
-  invoiceId: String,                         // if you use invoice concept
-  providerReference: String,                 // provider ref if different
+  reference: { type: String, index: true },
+  invoiceId: String,
+  providerReference: String,
 
   status: {
     type: String,
@@ -24,10 +24,21 @@ const PaymentSchema = new Schema({
     index: true
   },
 
-  // raw provider payloads for debugging/audit
-  providerRequest: Schema.Types.Mixed,
-  providerResponse: Schema.Types.Mixed,
-  providerWebhook: Schema.Types.Mixed
-}, { timestamps: true });
+  providerRequest: mongoose.Schema.Types.Mixed,
+  providerResponse: mongoose.Schema.Types.Mixed,
+  providerWebhook: mongoose.Schema.Types.Mixed
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
 
-module.exports = model('Payment', PaymentSchema);
+// Virtual populate to get charity details
+PaymentSchema.virtual('charity', {
+  ref: 'Charity',
+  localField: 'projectId',
+  foreignField: '_id',
+  justOne: true
+});
+
+module.exports = mongoose.model('Payment', PaymentSchema);

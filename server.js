@@ -29,7 +29,11 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const eventRoutes = require('./routes/eventRoutes');
 const volunteerRoutes = require('./routes/volunteerRoutes');
 const contactRoutes = require('./routes/contactRoutes');
-const paymentRoutes = require('./routes/paymentRoutes');
+const paymentsRouter = require('./routes/paymentsRouter');
+const reportRoutes = require('./routes/reportRoutes');
+const activityRoutes = require('./routes/activityRoutes');
+const userRoutes = require('./routes/userRoutes');
+
 
 const app = express();
 
@@ -116,8 +120,10 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/events', eventRoutes);
 app.use('/api/volunteers', volunteerRoutes);
 app.use('/api/contact', contactRoutes);
-app.use('/api/payments', paymentRoutes);
-
+app.use('/api/payments', paymentsRouter);
+app.use('/api/reports', reportRoutes);
+app.use('/api/activities', activityRoutes);
+app.use('/api/users', userRoutes);
 /* ---------------- Healthcheck ---------------- */
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

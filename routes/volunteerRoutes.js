@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { applyVolunteer, getVolunteers, updateVolunteerStatus } = require('../controllers/volunteerController');
+const { 
+  applyVolunteer, 
+  getVolunteers, 
+  updateVolunteerStatus,
+  sendCustomEmail 
+} = require('../controllers/volunteerController');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -26,11 +31,8 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } }); // li
 
 // === Routes ===
 router.post('/apply', upload.single('cv'), applyVolunteer);
-
-// ✅ Add this so GET /api/volunteers works
 router.get('/', getVolunteers);
-
-// Optional: update status
 router.patch('/:id/status', updateVolunteerStatus);
+router.post('/send-email', sendCustomEmail); // Add custom email endpoint
 
 module.exports = router;

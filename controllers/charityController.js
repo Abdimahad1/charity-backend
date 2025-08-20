@@ -1,9 +1,7 @@
+const mongoose = require('mongoose');
 const Charity = require('../models/Charity');
 
-/** PUBLIC: GET /api/charities
- *  - Defaults to status=Published
- *  - Supports q, category, featured, page, limit
- */
+/** PUBLIC: GET /api/charities */
 exports.listCharitiesPublic = async (req, res, next) => {
   try {
     const {
@@ -39,10 +37,7 @@ exports.listCharitiesPublic = async (req, res, next) => {
   }
 };
 
-/** ADMIN: GET /api/charities/admin
- *  - status=all|Draft|Published (default: all)
- *  - Supports q, category, featured, page, limit
- */
+/** ADMIN: GET /api/charities/admin */
 exports.listCharitiesAdmin = async (req, res, next) => {
   try {
     const {
@@ -60,10 +55,8 @@ exports.listCharitiesAdmin = async (req, res, next) => {
       filter.$or = [{ title: rx }, { location: rx }, { excerpt: rx }];
     }
     if (status !== 'all') {
-      // Normalize and validate
       const allowed = ['Draft', 'Published'];
-      const normalized =
-        status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      const normalized = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
       if (!allowed.includes(normalized)) {
         return res.status(400).json({ message: 'Invalid status value' });
       }
@@ -88,7 +81,7 @@ exports.listCharitiesAdmin = async (req, res, next) => {
   }
 };
 
-/** GET /api/charities/:id (public: allows viewing only Published; admins can use /admin/:id) */
+/** GET /api/charities/:id */
 exports.getCharity = async (req, res, next) => {
   try {
     const item = await Charity.findOne({ _id: req.params.id, status: 'Published' });
@@ -99,7 +92,7 @@ exports.getCharity = async (req, res, next) => {
   }
 };
 
-/** ADMIN: GET /api/charities/admin/:id (no status restriction) */
+/** ADMIN: GET /api/charities/admin/:id */
 exports.getCharityAdmin = async (req, res, next) => {
   try {
     const item = await Charity.findById(req.params.id);
@@ -156,7 +149,7 @@ function sanitize(body) {
     location: body.location,
     goal: num(body.goal),
     raised: num(body.raised),
-    status: body.status, // 'Draft' | 'Published'
+    status: body.status,
     cover: body.cover,
     donationLink: body.donationLink,
     featured: bool(body.featured),
@@ -170,6 +163,7 @@ function num(v) {
   const n = Number(v);
   return Number.isNaN(n) ? undefined : n;
 }
+
 function bool(v) {
   if (v === '' || v === undefined || v === null) return undefined;
   return v === true || v === 'true';
