@@ -53,7 +53,7 @@ app.use(express.urlencoded({ extended: true }));
 
 /* ---------------- CORS Configuration ---------------- */
 const allowedOrigins = [
-  'https://charity-foundation-web.onrender.com',
+  'https://www.al-haqwelfarefoundation.org',
   'https://charity-admin-dashboard.onrender.com',
   'http://localhost:3000',
   'http://localhost:5173',
