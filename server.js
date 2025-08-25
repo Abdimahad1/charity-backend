@@ -15,6 +15,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
+const sharp = require('sharp');
 
 const connectDB = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
@@ -70,6 +71,7 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   'https://www.al-haqwelfarefoundation.org',
   'https://charity-admin-dashboard.onrender.com',
+  'https://charity-backend-c05j.onrender.com',
   'http://localhost:3000',
   'http://localhost:5173',
   'http://localhost:5000'
@@ -83,7 +85,8 @@ app.use((req, res, next) => {
   if (origin && (allowedOrigins.includes(origin) || 
                  origin.includes('localhost') || 
                  origin.includes('127.0.0.1') ||
-                 origin.endsWith('.render.com'))) {
+                 origin.endsWith('.render.com') ||
+                 origin.endsWith('.al-haqwelfarefoundation.org'))) {
     res.header('Access-Control-Allow-Origin', origin);
   }
   
@@ -103,13 +106,17 @@ app.use((req, res, next) => {
 // Also use the cors package with safe configuration
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
+    
     if (allowedOrigins.includes(origin) || 
         origin.includes('localhost') || 
         origin.includes('127.0.0.1') ||
-        origin.endsWith('.render.com')) {
+        origin.endsWith('.render.com') ||
+        origin.endsWith('.al-haqwelfarefoundation.org')) {
       callback(null, true);
     } else {
+      console.log('CORS blocked for origin:', origin);
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -204,7 +211,26 @@ app.get('/api/image-test', async (req, res) => {
   try {
     const testImagePath = path.join(__dirname, 'test-image.jpg');
     
-    // Generate optimized versions
+    // Check if test image exists
+    if (!fs.existsSync(testImagePath)) {
+      // Create a simple test image if it doesn't exist
+      const svgBuffer = Buffer.from(
+        `<svg width="800" height="400" xmlns="http://www.w3.org/2000/svg">
+          <rect width="100%" height="100%" fill="#4F46E5"/>
+          <text x="50%" y="50%" font-family="Arial" font-size="40" fill="white" text-anchor="middle" dy=".3em">Test Image</text>
+        </svg>`
+      );
+      
+      const optimized = await sharp(svgBuffer)
+        .resize(800)
+        .jpeg({ quality: 75 })
+        .toBuffer();
+      
+      res.set('Content-Type', 'image/jpeg');
+      return res.send(optimized);
+    }
+    
+    // Generate optimized versions from existing test image
     const optimized = await sharp(testImagePath)
       .resize(800)
       .webp({ quality: 75, effort: 4 })
@@ -213,6 +239,7 @@ app.get('/api/image-test', async (req, res) => {
     res.set('Content-Type', 'image/webp');
     res.send(optimized);
   } catch (error) {
+    console.error('Image test error:', error);
     res.status(500).json({ error: 'Image processing test failed' });
   }
 });
@@ -231,6 +258,7 @@ app.use(errorHandler);
       console.log(`🌐 Allowed CORS origins:`);
       allowedOrigins.forEach(origin => console.log(`   - ${origin}`));
       console.log(`   - *.render.com (all subdomains)`);
+      console.log(`   - *.al-haqwelfarefoundation.org (all subdomains)`);
       console.log(`   - localhost & 127.0.0.1`);
       console.log(`📧 SMTP configured for: ${process.env.SMTP_USER || 'Not set'}`);
       console.log(`🖼️ Image optimization enabled`);
