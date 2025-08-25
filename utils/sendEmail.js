@@ -93,7 +93,7 @@ async function sendReceiptEmail({ email, name, amount, currency, method, referen
     `;
 
     const mailOptions = {
-      from: process.env.DEFAULT_FROM_EMAIL || 'mucjisoduusho123@gmail.com',
+      from: process.env.DEFAULT_FROM_EMAIL || 'Cabdiwahaababdikadir@gmail.com',
       to: email,
       subject: customSubject || `Thank you for your donation (${reference})`,
       html: `
@@ -118,7 +118,7 @@ async function sendReceiptEmail({ email, name, amount, currency, method, referen
             
             <div style="text-align: center; margin-top: 2rem;">
               <p style="font-size: 0.9rem; color: #666; margin-bottom: 0.5rem;">Need help or have questions?</p>
-              <a href="mailto:${process.env.SUPPORT_EMAIL || 'mucjisoduusho123@gmail.com'}" style="color: #1e3c72; text-decoration: none; font-weight: bold;">Contact Our Team</a>
+              <a href="mailto:${process.env.SUPPORT_EMAIL || 'Cabdiwahaababdikadir@gmail.com'}" style="color: #1e3c72; text-decoration: none; font-weight: bold;">Contact Our Team</a>
             </div>
           </div>
           
@@ -191,7 +191,7 @@ async function sendCvNotificationEmail({
     }
 
     const mailOptions = {
-      from: process.env.DEFAULT_FROM_EMAIL || 'mucjisoduusho123@gmail.com',
+      from: process.env.DEFAULT_FROM_EMAIL || 'Cabdiwahaababdikadir@gmail.com',
       to: adminEmail,
       subject: `📄 New Volunteer CV: ${volunteerName} - ${role}`,
       html: `

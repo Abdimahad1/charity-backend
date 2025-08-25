@@ -1,4 +1,3 @@
-// server.js
 // Load env before anything else
 require('dotenv').config({
   path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env'
@@ -42,10 +41,26 @@ app.set('trust proxy', 1);
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
   })
 );
 
-app.use(compression());
+app.use(compression({
+  level: 6,
+  threshold: 0,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use(cookieParser());
 
 app.use(express.json({ limit: '1mb' }));
@@ -123,9 +138,21 @@ app.use(
   '/uploads',
   express.static(uploadsRoot, {
     maxAge: '365d',
-    setHeaders: (res) => {
+    immutable: true,
+    setHeaders: (res, filePath) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      
+      // Add aggressive caching for images
+      if (filePath.endsWith('.webp') || filePath.endsWith('.jpg') || 
+          filePath.endsWith('.jpeg') || filePath.endsWith('.png')) {
+        res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      }
+      
+      // Enable Brotli compression for supported clients
+      if (req.headers['accept-encoding'] && req.headers['accept-encoding'].includes('br')) {
+        res.setHeader('Content-Encoding', 'br');
+      }
     },
   })
 );
@@ -172,6 +199,24 @@ app.get('/api/test', (req, res) => {
   });
 });
 
+// Image optimization test endpoint
+app.get('/api/image-test', async (req, res) => {
+  try {
+    const testImagePath = path.join(__dirname, 'test-image.jpg');
+    
+    // Generate optimized versions
+    const optimized = await sharp(testImagePath)
+      .resize(800)
+      .webp({ quality: 75, effort: 4 })
+      .toBuffer();
+    
+    res.set('Content-Type', 'image/webp');
+    res.send(optimized);
+  } catch (error) {
+    res.status(500).json({ error: 'Image processing test failed' });
+  }
+});
+
 /* ---------------- Errors ---------------- */
 app.use(notFound);
 app.use(errorHandler);
@@ -188,6 +233,7 @@ app.use(errorHandler);
       console.log(`   - *.render.com (all subdomains)`);
       console.log(`   - localhost & 127.0.0.1`);
       console.log(`📧 SMTP configured for: ${process.env.SMTP_USER || 'Not set'}`);
+      console.log(`🖼️ Image optimization enabled`);
     });
   } catch (err) {
     console.error('❌ Failed to start server:', err);

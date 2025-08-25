@@ -49,11 +49,9 @@ const DOC_MIMES = new Set([
 const fileFilter = (_req, file, cb) => {
   const ext = path.extname(file.originalname || '').toLowerCase();
   const mime = (file.mimetype || '').toLowerCase();
-  console.log('Upload attempt:', { originalname: file.originalname, ext, mime }); // Add this
 
   if (file.fieldname === 'cv') {
     if (!DOC_MIMES.has(mime)) {
-      console.log('Rejected CV: invalid MIME type', mime); // Add this
       return cb(new Error('Only PDF, DOC, DOCX allowed for CV'));
     }
     return cb(null, true);
@@ -62,7 +60,6 @@ const fileFilter = (_req, file, cb) => {
   const isImageMime = mime.startsWith('image/');
   const isAllowedExt = IMAGE_EXTS.has(ext) || (ext === '' && isImageMime);
   if (!isImageMime || !isAllowedExt) {
-    console.log('Rejected image:', { isImageMime, isAllowedExt }); // Add this
     return cb(new Error('Only image files allowed (jpg, jpeg, png, gif, webp, avif, jfif)'));
   }
   cb(null, true);
@@ -75,10 +72,19 @@ const upload = multer({
 });
 
 /* ---------- Image Processing ---------- */
+// Cache for variant generation to avoid processing the same image multiple times
+const processingCache = new Map();
+
 async function createImageVariants(filePath, filename) {
   // Validate inputs
   if (!filePath || !filename) {
     throw new Error('Invalid file path or filename');
+  }
+
+  // Check if we're already processing this file
+  const cacheKey = `${filePath}-${filename}`;
+  if (processingCache.has(cacheKey)) {
+    return processingCache.get(cacheKey);
   }
 
   // Create variant paths with WebP extension
@@ -90,6 +96,18 @@ async function createImageVariants(filePath, filename) {
     thumb: path.join(imagesDir, `thumb_${baseName}.webp`),
   };
 
+  // Add to cache to prevent duplicate processing
+  processingCache.set(cacheKey, new Promise((resolve, reject) => {
+    processImageVariants(filePath, variants, baseName)
+      .then(result => resolve(result))
+      .catch(err => reject(err))
+      .finally(() => processingCache.delete(cacheKey));
+  }));
+
+  return processingCache.get(cacheKey);
+}
+
+async function processImageVariants(filePath, variants, baseName) {
   try {
     // First validate the image
     const metadata = await sharp(filePath).metadata();
@@ -107,8 +125,9 @@ async function createImageVariants(filePath, filename) {
           fit: 'inside'
         })
         .webp({ 
-          quality: 80,
-          alphaQuality: 80,
+          quality: 70,  // Reduced from 80 for better performance
+          alphaQuality: 70,
+          effort: 4,    // Better compression
           lossless: false
         })
         .toFile(variants.hd),
@@ -121,8 +140,9 @@ async function createImageVariants(filePath, filename) {
           fit: 'inside'
         })
         .webp({
-          quality: 75,
-          alphaQuality: 75
+          quality: 65,  // Reduced from 75
+          alphaQuality: 65,
+          effort: 4
         })
         .toFile(variants.medium),
 
@@ -136,8 +156,9 @@ async function createImageVariants(filePath, filename) {
           position: 'center'
         })
         .webp({
-          quality: 70,
-          alphaQuality: 70
+          quality: 60,  // Reduced from 70
+          alphaQuality: 60,
+          effort: 4
         })
         .toFile(variants.thumb),
 
@@ -145,8 +166,9 @@ async function createImageVariants(filePath, filename) {
       !['.webp', '.gif'].includes(path.extname(filePath).toLowerCase())
         ? sharp(filePath)
             .webp({
-              quality: 85,
-              alphaQuality: 85
+              quality: 75,  // Reduced from 85
+              alphaQuality: 75,
+              effort: 4
             })
             .toFile(variants.original)
         : Promise.resolve()
@@ -186,8 +208,28 @@ async function createImageVariants(filePath, filename) {
   }
 }
 
+// Lazy variant generation - only generate when requested
+async function ensureVariantExists(variantPath, originalPath, options) {
+  try {
+    await fs.access(variantPath);
+    return variantPath; // Variant already exists
+  } catch {
+    // Generate the variant
+    await sharp(originalPath)
+      .resize(options.resize)
+      .webp(options.webp)
+      .toFile(variantPath);
+    return variantPath;
+  }
+}
+
 /* ---------- Helpers ---------- */
 const makeUrl = (req, subpath) => {
+  // Use CDN in production if configured
+  if (process.env.NODE_ENV === 'production' && process.env.CDN_URL) {
+    return `${process.env.CDN_URL}/uploads/${subpath.replace(/^\/+/, '')}`;
+  }
+  
   // trust proxy is enabled in server.js, but be extra robust here
   const proto = req.get('x-forwarded-proto') || req.protocol;
   const host = req.get('x-forwarded-host') || req.get('host');
@@ -201,6 +243,45 @@ const makeRelative = (subpath) => `/uploads/${subpath.replace(/^\/+/, '')}`;
 
 // quick probe
 router.get('/ping', (_req, res) => res.json({ ok: true }));
+
+/**
+ * GET /api/upload/variant/:filename - Get specific image variant
+ */
+router.get('/variant/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    const { type = 'original', width } = req.query;
+    
+    const filePath = path.join(imagesDir, filename);
+    
+    // Check if file exists
+    try {
+      await fs.access(filePath);
+    } catch {
+      return res.status(404).json({ message: 'File not found' });
+    }
+    
+    // If specific width requested, generate on-the-fly
+    if (width && !isNaN(parseInt(width))) {
+      const widthInt = parseInt(width);
+      const variantFilename = `w${widthInt}_${filename}`;
+      const variantPath = path.join(imagesDir, variantFilename);
+      
+      await ensureVariantExists(variantPath, filePath, {
+        resize: { width: widthInt, withoutEnlargement: true, fit: 'inside' },
+        webp: { quality: 70, effort: 4 }
+      });
+      
+      return res.sendFile(variantPath);
+    }
+    
+    // Serve requested variant
+    return res.sendFile(filePath);
+  } catch (err) {
+    console.error('Error serving variant:', err);
+    return res.status(500).json({ message: 'Error serving image' });
+  }
+});
 
 /**
  * POST /api/upload           (default image)
