@@ -41,14 +41,15 @@ app.set('trust proxy', 1);
 /* ---------------- Security & body parsing ---------------- */
 app.use(
   helmet({
-    crossOriginResourcePolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        imgSrc: ["'self'", "data:", "https:", "blob:", "*"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
+        connectSrc: ["'self'", "https:", "http:"],
       },
     },
   })
@@ -64,8 +65,8 @@ app.use(compression({
 }));
 app.use(cookieParser());
 
-app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 /* ---------------- CORS Configuration ---------------- */
 const allowedOrigins = [
@@ -77,33 +78,7 @@ const allowedOrigins = [
   'http://localhost:5000'
 ];
 
-// Custom CORS middleware - simpler and more reliable
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  
-  // Check if origin is allowed
-  if (origin && (allowedOrigins.includes(origin) || 
-                 origin.includes('localhost') || 
-                 origin.includes('127.0.0.1') ||
-                 origin.endsWith('.render.com') ||
-                 origin.endsWith('.al-haqwelfarefoundation.org'))) {
-    res.header('Access-Control-Allow-Origin', origin);
-  }
-  
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-  res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Max-Age', '86400');
-  
-  // Handle preflight requests
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  
-  next();
-});
-
-// Also use the cors package with safe configuration
+// Enhanced CORS configuration
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, postman)
@@ -120,8 +95,35 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  credentials: true
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
+
+// Custom CORS middleware for additional headers
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Check if origin is allowed
+  if (origin && (allowedOrigins.includes(origin) || 
+                 origin.includes('localhost') || 
+                 origin.includes('127.0.0.1') ||
+                 origin.endsWith('.render.com') ||
+                 origin.endsWith('.al-haqwelfarefoundation.org'))) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
 
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('dev'));
@@ -155,11 +157,6 @@ app.use(
           filePath.endsWith('.jpeg') || filePath.endsWith('.png')) {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       }
-      
-      // Enable Brotli compression for supported clients
-      if (req.headers['accept-encoding'] && req.headers['accept-encoding'].includes('br')) {
-        res.setHeader('Content-Encoding', 'br');
-      }
     },
   })
 );
@@ -181,7 +178,8 @@ app.use('/api/users', userRoutes);
 app.get('/health', (_req, res) => res.json({ 
   ok: true, 
   message: 'Server is running',
-  timestamp: new Date().toISOString()
+  timestamp: new Date().toISOString(),
+  environment: process.env.NODE_ENV || 'development'
 }));
 
 // Add CORS test endpoint
@@ -253,8 +251,8 @@ app.use(errorHandler);
   try {
     await connectDB();
     const port = Number(process.env.PORT || 5000);
-    app.listen(port, () => {
-      console.log(`🚀 API listening on http://localhost:${port}`);
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`🚀 API listening on http://0.0.0.0:${port}`);
       console.log(`🌐 Allowed CORS origins:`);
       allowedOrigins.forEach(origin => console.log(`   - ${origin}`));
       console.log(`   - *.render.com (all subdomains)`);
