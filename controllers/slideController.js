@@ -1,15 +1,5 @@
 const Slide = require('../models/Slide');
-
-function toUploadsPath(v) {
-  if (!v) return v;
-  const s = String(v);
-  const m = s.match(/\/uploads\/[^\s"'?]+/);
-  if (m) return m[0];
-  const noOrigin = s.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+/, '');
-  if (noOrigin.startsWith('uploads/')) return `/${noOrigin}`;
-  if (noOrigin.startsWith('images/')) return `/uploads/${noOrigin}`;
-  return `/uploads/images/${noOrigin}`;
-}
+const { normalizeImage } = require('../utils/normalizeImage');
 
 /** GET /api/slides */
 exports.listSlides = async (req, res, next) => {
@@ -26,6 +16,7 @@ exports.listSlides = async (req, res, next) => {
     const items = await Slide.find(filter)
       .sort({ position: -1, createdAt: -1 })
       .limit(Number(limit));
+
     res.json({ items, total: items.length });
   } catch (err) { next(err); }
 };
@@ -53,7 +44,11 @@ exports.createSlide = async (req, res, next) => {
 exports.updateSlide = async (req, res, next) => {
   try {
     const payload = sanitize(req.body);
-    const updated = await Slide.findByIdAndUpdate(req.params.id, payload, { new: true, runValidators: true });
+    const updated = await Slide.findByIdAndUpdate(
+      req.params.id,
+      payload,
+      { new: true, runValidators: true }
+    );
     if (!updated) return res.status(404).json({ message: 'Slide not found' });
     res.json(updated);
   } catch (err) { next(err); }
@@ -86,10 +81,10 @@ exports.moveSlide = async (req, res, next) => {
 
 function sanitize(b = {}) {
   const x = {
-    title: b.title,
-    subtitle: b.subtitle,
-    alt: b.alt,
-    src: b.src ? toUploadsPath(b.src) : undefined,  // <-- normalize here
+    title: b.title?.trim(),
+    subtitle: b.subtitle?.trim(),
+    alt: (b.alt ?? '').toString().trim() || 'Homepage slide',
+    src: b.src != null ? normalizeImage(b.src) : undefined, // <-- keep data:, http(s), or /uploads
     align: b.align,
     overlay: num(b.overlay),
     published: bool(b.published),
@@ -98,5 +93,6 @@ function sanitize(b = {}) {
   Object.keys(x).forEach(k => x[k] === undefined && delete x[k]);
   return x;
 }
+
 const num = v => (v === '' || v === undefined || v === null ? undefined : Number(v));
 const bool = v => (v === '' || v === undefined || v === null ? undefined : (v === true || v === 'true'));

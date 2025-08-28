@@ -1,36 +1,21 @@
 const mongoose = require('mongoose');
-
-/** Ensure we always keep a relative /uploads/... path in DB */
-function toUploadsPath(v) {
-  if (!v) return v;
-  const s = String(v);
-
-  // If it's already a /uploads/... path, keep it
-  const m = s.match(/\/uploads\/[^\s"'?]+/);
-  if (m) return m[0];
-
-  // Strip origin if a full URL got sent accidentally
-  const noOrigin = s.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+/, '');
-
-  // Accept "uploads/..." or "images/..." or bare filename → normalize
-  if (noOrigin.startsWith('uploads/')) return `/${noOrigin}`;
-  if (noOrigin.startsWith('images/')) return `/uploads/${noOrigin}`;
-  return `/uploads/images/${noOrigin}`;
-}
+const { normalizeImage } = require('../utils/normalizeImage');
 
 const SlideSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true },
     subtitle: { type: String, trim: true },
-    alt: { type: String, default: 'Homepage slide' },
-    // Store RELATIVE path (e.g., /uploads/images/hero.webp), never an absolute URL
+    alt: { type: String, default: 'Homepage slide', trim: true },
+    // Allow data:, http(s), or /uploads/...
     src: {
       type: String,
       required: true,
-      set: toUploadsPath,
+      set: v => normalizeImage(v),
       validate: {
-        validator: (v) => typeof v === 'string' && /^\/uploads\//.test(v),
-        message: 'src must be a relative /uploads/... path'
+        validator: v =>
+          typeof v === 'string' &&
+          ( /^data:/i.test(v) || /^\/uploads\//.test(v) || /^https?:\/\//i.test(v) ),
+        message: 'src must be data:, http(s), or a /uploads/... path'
       }
     },
     align: { type: String, enum: ['left', 'center', 'right'], default: 'left' },
