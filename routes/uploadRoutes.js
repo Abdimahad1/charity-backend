@@ -81,24 +81,28 @@ async function createImageVariants(filePath, filename) {
     throw new Error('Invalid file path or filename');
   }
 
+  const extLower = path.extname(filename).toLowerCase();   // e.g. .jpg / .gif / .webp
+  const baseName = filename.replace(extLower, '');         // filename without extension
+
   // Check if we're already processing this file
   const cacheKey = `${filePath}-${filename}`;
   if (processingCache.has(cacheKey)) {
     return processingCache.get(cacheKey);
   }
 
-  // Create variant paths with WebP extension
-  const baseName = filename.replace(path.extname(filename), '');
+  // IMPORTANT: if GIF, keep original GIF as "original";
+  // otherwise, "original" is the .webp we create (or the existing .webp file).
   const variants = {
-    original: path.join(imagesDir, `${baseName}.webp`),
+    original: extLower === '.gif'
+      ? path.join(imagesDir, filename)                    // keep the GIF as-is
+      : path.join(imagesDir, `${baseName}.webp`),         // convert other types to .webp (or pass through if already .webp)
     hd: path.join(imagesDir, `hd_${baseName}.webp`),
     medium: path.join(imagesDir, `medium_${baseName}.webp`),
     thumb: path.join(imagesDir, `thumb_${baseName}.webp`),
   };
 
-  // Add to cache to prevent duplicate processing
   processingCache.set(cacheKey, new Promise((resolve, reject) => {
-    processImageVariants(filePath, variants, baseName)
+    processImageVariants(filePath, variants, baseName, extLower)
       .then(result => resolve(result))
       .catch(err => reject(err))
       .finally(() => processingCache.delete(cacheKey));
@@ -107,75 +111,44 @@ async function createImageVariants(filePath, filename) {
   return processingCache.get(cacheKey);
 }
 
-async function processImageVariants(filePath, variants, baseName) {
+async function processImageVariants(filePath, variants, baseName, extLower) {
   try {
-    // First validate the image
+    // Validate the image
     const metadata = await sharp(filePath).metadata();
     if (!metadata || !metadata.width || !metadata.height) {
       throw new Error('Invalid image file');
     }
 
-    // Create variants in parallel for better performance
+    // Create variants in parallel
     await Promise.all([
-      // HD variant (1920px width)
+      // HD (1920)
       sharp(filePath)
-        .resize({ 
-          width: 1920, 
-          withoutEnlargement: true,
-          fit: 'inside'
-        })
-        .webp({ 
-          quality: 70,  // Reduced from 80 for better performance
-          alphaQuality: 70,
-          effort: 4,    // Better compression
-          lossless: false
-        })
+        .resize({ width: 1920, withoutEnlargement: true, fit: 'inside' })
+        .webp({ quality: 70, alphaQuality: 70, effort: 4, lossless: false })
         .toFile(variants.hd),
 
-      // Medium variant (960px width)
+      // Medium (960)
       sharp(filePath)
-        .resize({
-          width: 960,
-          withoutEnlargement: true,
-          fit: 'inside'
-        })
-        .webp({
-          quality: 65,  // Reduced from 75
-          alphaQuality: 65,
-          effort: 4
-        })
+        .resize({ width: 960, withoutEnlargement: true, fit: 'inside' })
+        .webp({ quality: 65, alphaQuality: 65, effort: 4 })
         .toFile(variants.medium),
 
-      // Thumbnail variant (480px width)
+      // Thumb (480x320 cover)
       sharp(filePath)
-        .resize({
-          width: 480,
-          height: 320,
-          withoutEnlargement: true,
-          fit: 'cover',
-          position: 'center'
-        })
-        .webp({
-          quality: 60,  // Reduced from 70
-          alphaQuality: 60,
-          effort: 4
-        })
+        .resize({ width: 480, height: 320, withoutEnlargement: true, fit: 'cover', position: 'center' })
+        .webp({ quality: 60, alphaQuality: 60, effort: 4 })
         .toFile(variants.thumb),
 
-      // Convert original to WebP (if not already WebP or GIF)
-      !['.webp', '.gif'].includes(path.extname(filePath).toLowerCase())
+      // Convert "original" for non-webp, non-gif types only
+      (extLower !== '.webp' && extLower !== '.gif')
         ? sharp(filePath)
-            .webp({
-              quality: 75,  // Reduced from 85
-              alphaQuality: 75,
-              effort: 4
-            })
+            .webp({ quality: 75, alphaQuality: 75, effort: 4 })
             .toFile(variants.original)
         : Promise.resolve()
     ]);
 
-    // Clean up the original file if we converted it to WebP
-    if (!['.webp', '.gif'].includes(path.extname(filePath).toLowerCase())) {
+    // Clean up the original file if we converted (i.e., for non-webp and non-gif)
+    if (extLower !== '.webp' && extLower !== '.gif') {
       await fs.unlink(filePath).catch(err => {
         console.warn('Could not delete original file:', err);
       });
@@ -185,7 +158,8 @@ async function processImageVariants(filePath, variants, baseName) {
       hd: `hd_${baseName}.webp`,
       medium: `medium_${baseName}.webp`,
       thumb: `thumb_${baseName}.webp`,
-      original: `${baseName}.webp`,
+      // If GIF, "original" is the original GIF filename; else it's baseName.webp
+      original: extLower === '.gif' ? path.basename(filePath) : `${baseName}.webp`,
       metadata: {
         width: metadata.width,
         height: metadata.height,
@@ -196,11 +170,11 @@ async function processImageVariants(filePath, variants, baseName) {
 
   } catch (err) {
     console.error('Error processing image:', err);
-    
-    // Clean up any partially created files
+
+    // Clean up any partially created files (ignore the uploaded original)
     await Promise.allSettled(
       Object.values(variants)
-        .filter(v => v !== filePath) // Don't delete the original input file
+        .filter(v => v !== filePath)
         .map(v => fs.unlink(v).catch(() => {}))
     );
 
@@ -214,7 +188,6 @@ async function ensureVariantExists(variantPath, originalPath, options) {
     await fs.access(variantPath);
     return variantPath; // Variant already exists
   } catch {
-    // Generate the variant
     await sharp(originalPath)
       .resize(options.resize)
       .webp(options.webp)
@@ -229,7 +202,7 @@ const makeUrl = (req, subpath) => {
   if (process.env.NODE_ENV === 'production' && process.env.CDN_URL) {
     return `${process.env.CDN_URL}/uploads/${subpath.replace(/^\/+/, '')}`;
   }
-  
+
   // trust proxy is enabled in server.js, but be extra robust here
   const proto = req.get('x-forwarded-proto') || req.protocol;
   const host = req.get('x-forwarded-host') || req.get('host');
@@ -246,36 +219,41 @@ router.get('/ping', (_req, res) => res.json({ ok: true }));
 
 /**
  * GET /api/upload/variant/:filename - Get specific image variant
+ * Example: /api/upload/variant/abc.webp?width=960
  */
 router.get('/variant/:filename', async (req, res) => {
   try {
     const { filename } = req.params;
-    const { type = 'original', width } = req.query;
-    
+    const { width } = req.query;
+
     const filePath = path.join(imagesDir, filename);
-    
+
     // Check if file exists
     try {
       await fs.access(filePath);
     } catch {
       return res.status(404).json({ message: 'File not found' });
     }
-    
+
     // If specific width requested, generate on-the-fly
     if (width && !isNaN(parseInt(width))) {
       const widthInt = parseInt(width);
       const variantFilename = `w${widthInt}_${filename}`;
       const variantPath = path.join(imagesDir, variantFilename);
-      
+
       await ensureVariantExists(variantPath, filePath, {
         resize: { width: widthInt, withoutEnlargement: true, fit: 'inside' },
         webp: { quality: 70, effort: 4 }
       });
-      
+
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+      res.set('Access-Control-Allow-Origin', '*');
       return res.sendFile(variantPath);
     }
-    
-    // Serve requested variant
+
+    // Serve original file (as stored)
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Access-Control-Allow-Origin', '*');
     return res.sendFile(filePath);
   } catch (err) {
     console.error('Error serving variant:', err);
@@ -290,7 +268,7 @@ router.get('/variant/:filename', async (req, res) => {
 router.post('/', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    
+
     // Process image variants if it's an image (not for CV)
     let variants = {};
     if (req.file.fieldname !== 'cv') {
@@ -302,11 +280,11 @@ router.post('/', upload.single('file'), async (req, res) => {
 
     const rel = makeRelative(`images/${variants.original || req.file.filename}`);
     const url = makeUrl(req, `images/${variants.original || req.file.filename}`);
-    
-    return res.status(201).json({ 
-      url, 
-      path: rel, 
-      filename: variants.original || req.file.filename, 
+
+    return res.status(201).json({
+      url,
+      path: rel,
+      filename: variants.original || req.file.filename,
       kind: 'image',
       variants: variants.original ? {
         hd: makeUrl(req, `images/${variants.hd}`),
@@ -327,7 +305,7 @@ router.post('/', upload.single('file'), async (req, res) => {
 router.post('/image', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
-    
+
     const variants = await createImageVariants(
       path.join(imagesDir, req.file.filename),
       req.file.filename
@@ -335,11 +313,11 @@ router.post('/image', upload.single('file'), async (req, res) => {
 
     const rel = makeRelative(`images/${variants.original}`);
     const url = makeUrl(req, `images/${variants.original}`);
-    
-    return res.status(201).json({ 
-      url, 
-      path: rel, 
-      filename: variants.original, 
+
+    return res.status(201).json({
+      url,
+      path: rel,
+      filename: variants.original,
       kind: 'image',
       variants: {
         hd: makeUrl(req, `images/${variants.hd}`),
@@ -367,20 +345,29 @@ router.post('/cv', upload.single('cv'), (req, res) => {
 /* ---------- Multer error handler (nice messages) ---------- */
 router.use((err, _req, res, _next) => {
   if (err instanceof multer.MulterError) {
+    // Map codes and send 413 for size limit so UI can say "image is too large"
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({
+        message: 'File too large (max 10MB)',
+        code: 'LIMIT_FILE_SIZE'
+      });
+    }
     const map = {
-      LIMIT_FILE_SIZE: 'File too large (max 10MB)',
       LIMIT_FILE_COUNT: 'Too many files',
       LIMIT_UNEXPECTED_FILE: 'Unexpected field',
     };
-    return res.status(400).json({ 
+    return res.status(400).json({
       message: map[err.code] || err.message,
-      code: err.code 
+      code: err.code
     });
   }
-  if (err) return res.status(400).json({ 
-    message: err.message || 'Upload error',
-    details: err.stack 
-  });
+  if (err) {
+    return res.status(400).json({
+      message: err.message || 'Upload error',
+      code: err.code || 'UPLOAD_ERROR',
+      details: err.stack
+    });
+  }
   res.status(500).json({ message: 'Unknown upload error' });
 });
 

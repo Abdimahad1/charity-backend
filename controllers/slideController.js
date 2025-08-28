@@ -1,5 +1,16 @@
 const Slide = require('../models/Slide');
 
+function toUploadsPath(v) {
+  if (!v) return v;
+  const s = String(v);
+  const m = s.match(/\/uploads\/[^\s"'?]+/);
+  if (m) return m[0];
+  const noOrigin = s.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+/, '');
+  if (noOrigin.startsWith('uploads/')) return `/${noOrigin}`;
+  if (noOrigin.startsWith('images/')) return `/uploads/${noOrigin}`;
+  return `/uploads/images/${noOrigin}`;
+}
+
 /** GET /api/slides */
 exports.listSlides = async (req, res, next) => {
   try {
@@ -12,7 +23,9 @@ exports.listSlides = async (req, res, next) => {
     if (published === 'true') filter.published = true;
     if (published === 'false') filter.published = false;
 
-    const items = await Slide.find(filter).sort({ position: -1, createdAt: -1 }).limit(Number(limit));
+    const items = await Slide.find(filter)
+      .sort({ position: -1, createdAt: -1 })
+      .limit(Number(limit));
     res.json({ items, total: items.length });
   } catch (err) { next(err); }
 };
@@ -62,9 +75,8 @@ exports.moveSlide = async (req, res, next) => {
     const s = await Slide.findById(req.params.id);
     if (!s) return res.status(404).json({ message: 'Slide not found' });
 
-    // bump position up or down by adjusting number
     const delta = dir === 'down' ? -1 : 1;
-    s.position = s.position + delta;
+    s.position = (typeof s.position === 'number' ? s.position : Date.now()) + delta;
     await s.save();
 
     const items = await Slide.find({}).sort({ position: -1, createdAt: -1 });
@@ -77,7 +89,7 @@ function sanitize(b = {}) {
     title: b.title,
     subtitle: b.subtitle,
     alt: b.alt,
-    src: b.src,
+    src: b.src ? toUploadsPath(b.src) : undefined,  // <-- normalize here
     align: b.align,
     overlay: num(b.overlay),
     published: bool(b.published),
